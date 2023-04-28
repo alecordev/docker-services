@@ -1,0 +1,16 @@
+ipython
+jupyterlab
+
+numpy
+pandas
+matplotlib
+scikit-learn
+seaborn
+statsmodels
+scipy
+sympy
+
+plotly
+streamlit
+requests
+joblib

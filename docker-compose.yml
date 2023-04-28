@@ -1,0 +1,210 @@
+version: "3.9"
+
+services:
+
+    postgresql:
+        image: postgres:latest
+        container_name: postgres
+        ports:
+            - "5432:5432"
+        environment:
+            - POSTGRES_DB=${POSTGRES_DB:-postgres}
+            - POSTGRES_USER=${POSTGRES_USER:-postgres}
+            - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+            - DATABASE_HOST=${DB_HOST:-localhost}
+        volumes:
+            - ./.docker/data:/var/lib/postgresql/data
+        restart: unless-stopped
+
+    redis:
+        image: redis:latest
+        container_name: redis
+        command: redis-server --requirepass password
+        ports:
+            - "6379:6379"
+        volumes:
+            - ./.docker/redis/data:/var/lib/redis
+        environment:
+            - REDIS_REPLICATION_MODE=master
+        deploy:
+            resources:
+                limits:
+                    memory: 128M
+
+    rabbitmq:
+        image: rabbitmq:3-management-alpine
+        container_name: rabbitmq
+        volumes:
+            - ./.docker/rabbitmq/etc/:/usr/share/etc/rabbitmq/
+            - ./.docker/rabbitmq/data/:/usr/share/var/lib/rabbitmq/
+            - ./.docker/rabbitmq/logs/:/usr/share/var/log/rabbitmq/
+        environment:
+            RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:-4634198b289042938617f7c5c77d99d1}
+            RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-admin}
+            RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-admin}
+        ports:
+            - 5672:5672 # AMQP protocol port
+            - 15672:15672 # HTTP management UI
+        networks:
+            - internal-rabbit-network
+
+    mongo:
+        image: mongo:latest
+        container_name: mongodb
+        environment:
+            - MONGO_INITDB_ROOT_USERNAME=admin
+            - MONGO_INITDB_DATABASE=auth
+            - MONGO_INITDB_ROOT_PASSWORD=admin
+        networks:
+            - mongo-network
+        ports:
+            - '27017:27017'
+        volumes:
+            - ./.docker/mongo/data:/data/db
+
+    mongo-express:
+        image: mongo-express:latest
+        container_name: mongo-express
+        depends_on:
+            - mongo
+        networks:
+            - mongo-network
+        environment:
+            - ME_CONFIG_MONGODB_SERVER=mongo
+            - ME_CONFIG_MONGODB_ADMINUSERNAME=admin
+            - ME_CONFIG_MONGODB_ADMINPASSWORD=admin
+            - ME_CONFIG_BASICAUTH_USERNAME=admin
+            - ME_CONFIG_BASICAUTH_PASSWORD=admin
+        ports:
+            - '8081:8081'
+        volumes:
+            - ./.docker/mongo/data:/data/db
+
+    neo4j:
+        image: neo4j:latest
+        container_name: neo4j
+        network_mode: "bridge"
+        ports:
+            - "7474:7474"
+            - "7687:7687"
+        environment:
+            - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+            - NEO4J_apoc_import_file_enabled=true
+            - NEO4J_dbms_shell_enabled=true
+            - NEO4J_AUTH=neo4j/admin
+        volumes:
+            - ./.docker/neo4j/plugins:/plugins
+            - ./.docker/neo4j/data:/data
+            - ./.docker/neo4j/import:/import
+
+    elasticsearch:
+        image: docker.elastic.co/elasticsearch/elasticsearch:8.7.0
+        container_name: elasticsearch
+        environment:
+            - xpack.security.enabled=false
+            - discovery.type=single-node
+        ulimits:
+            memlock:
+                soft: -1
+                hard: -1
+            nofile:
+                soft: 65536
+                hard: 65536
+        cap_add:
+            - IPC_LOCK
+        volumes:
+            - ./.docker/elastic/data:/usr/share/elasticsearch/data
+        ports:
+            - 9200:9200
+            - 9300:9300
+        networks:
+            - internal-elastic-network
+
+    kibana:
+        image: docker.elastic.co/kibana/kibana:8.7.0
+        container_name: elastickibana
+        environment:
+            - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+        ports:
+            - 5601:5601
+        depends_on:
+            - elasticsearch
+        networks:
+            - internal-elastic-network
+
+    # tigergraph:
+    #     image: "xpertmind/tigergraph:latest"
+    #     container_name: tigergraph
+    #     restart: unless-stopped
+    #     ports:
+    #         - '9000:9000'
+    #         - '14240:14240'
+    #     ulimits:
+    #         nofile:
+    #             soft: 1000000
+    #             hard: 1000000
+    #     volumes:
+    #         - ./.docker/TigerGraph/data:/var/lib/tigergraph/data
+    #         - ./.docker/TigerGraph/scripts:/home/tigergraph/scripts
+    #     stdin_open: true
+    #     tty: true
+
+    prometheus:
+        image: prom/prometheus:latest
+        container_name: prometheus
+        volumes:
+            - ./configs/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+        command:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+        ports:
+            - "9090:9090"
+        environment:
+            - "TZ=UTC"
+            - "PATH=/bin:/usr/bin:/sbin:/usr/sbin"
+            - "PROMETHEUS_USERNAME=admin"
+            - "PROMETHEUS_PASSWORD=password"
+
+    grafana:
+        image: grafana/grafana:latest
+        container_name: grafana
+        ports:
+            - "3000:3000"
+        environment:
+            - GF_SECURITY_ADMIN_USER=admin
+            - GF_SECURITY_ADMIN_PASSWORD=password
+
+    zookeeper:
+        image: wurstmeister/zookeeper
+        container_name: zookeeper
+        ports:
+            - '2181:2181'
+
+    kafka:
+        image: wurstmeister/kafka
+        container_name: kafka
+        ports:
+            - '9092:9092'
+        environment:
+            KAFKA_ADVERTISED_HOST_NAME: localhost
+            KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+            KAFKA_CREATE_TOPICS: "Topic1:1:3,Topic2:1:1:compact" # Topic 1 will have 1 partition and 3 replicas, Topic 2 will have 1 partition, 1 replica and a cleanup.policy set to compact
+            KAFKA_MESSAGE_MAX_BYTES: 2000000
+            KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+
+    kafka-ui:
+        image: provectuslabs/kafka-ui:latest
+        container_name: kafka-ui
+        ports:
+            - 8080:8080
+        environment:
+            DYNAMIC_CONFIG_ENABLED: true
+
+networks:
+    mongo-network:
+        driver: bridge
+    internal-rabbit-network:
+        name: internal-rabbit-network
+        external: false
+    internal-elastic-network:
+        name: internal-elastic-network
+        external: false
