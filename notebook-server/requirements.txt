@@ -11,6 +11,10 @@ scipy
 sympy
 
 plotly
-streamlit
 requests
 joblib
+
+streamlit==1.22.0
+transformers==4.29.2
+sentencepiece==0.1.99
+torch==2.0.1
